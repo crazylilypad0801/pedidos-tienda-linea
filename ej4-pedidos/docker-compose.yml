@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    container_name: ej4-pedidos
+    environment:
+      RESERVATION_TTL: "900"   # segundos que dura la reserva de stock
+    ports:
+      - "8000:8000"
+    volumes:
+      - datos:/data
+    restart: unless-stopped
+volumes:
+  datos:

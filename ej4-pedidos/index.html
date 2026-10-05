@@ -1,0 +1,62 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pedidos tienda en línea</title>
+<style>
+:root{--b:#7c3aed;--bg:#faf8ff;--t:#2e1065;--m:#6b7280;--e:#dc2626}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;padding:22px 32px}header h1{margin:0;font-size:22px}header p{margin:4px 0 0;opacity:.85}
+main{max-width:1150px;margin:auto;padding:24px;display:grid;gap:20px}
+.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 2px 10px #0001;overflow-x:auto}.card h2{margin:0 0 12px;font-size:16px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.prod{border:1px solid #e9d5ff;border-radius:12px;padding:14px;text-align:center}.prod .em{font-size:38px}.prod small{color:var(--m)}
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.kpi{background:#f5f3ff;border-radius:12px;padding:12px}.kpi b{display:block;font-size:22px}.kpi span{font-size:12px;color:var(--m)}
+button{background:var(--b);color:#fff;border:0;border-radius:8px;padding:7px 11px;cursor:pointer;font:inherit;margin:3px 3px 0 0}button.g{background:#e5e7eb;color:var(--t)}button.r{background:var(--e)}button:disabled{opacity:.4;cursor:not-allowed}
+.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}.ok{background:#dcfce7;color:#166534}.w{background:#fef3c7;color:#92400e}.e{background:#fee2e2;color:#991b1b}.i{background:#ede9fe;color:#5b21b6}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
+.steps{display:flex;gap:5px;flex-wrap:wrap}.st{padding:3px 9px;border-radius:99px;background:#f3f4f6;color:#9ca3af;font-size:11px}.st.on{background:#7c3aed;color:#fff}
+#msg{margin-top:10px;font-weight:600}
+</style></head><body>
+<header><h1>🛍️ Pedidos de la tienda en línea</h1><p>Pedido → reserva → pago → preparación → despacho · con compensaciones e idempotencia</p></header>
+<main>
+<div class="kpis" id="kpis"></div>
+<div class="card"><h2>Catálogo</h2><div class="grid" id="cat"></div></div>
+<div class="card"><h2>Carrito</h2><div id="cart">Carrito vacío</div><div id="msg"></div>
+ <button onclick="checkout()">Confirmar pedido</button><button class="g" onclick="cart={};cartKey=null;drawCart()">Vaciar</button><button class="g" onclick="reset()">Reiniciar demo</button></div>
+<div class="card"><h2>Pedidos (seguimiento del cliente + acciones del operador y de la pasarela)</h2><div id="ords">Sin pedidos</div></div>
+<div class="card"><h2>Bitácora</h2><div id="aud"></div></div>
+</main>
+<script>
+const $=i=>document.getElementById(i);
+const FLOW=['RESERVADO','PAGADO','EN_PREPARACION','DESPACHADO'];
+let PRODS=[],cart={},cartKey=null;
+async function api(p,m='GET',b,h={}){const r=await fetch('/api/'+p,{method:m,headers:{'Content-Type':'application/json',...h},body:b?JSON.stringify(b):undefined});return {code:r.status,d:await r.json()}}
+const pill=(t,c)=>`<span class="pill ${c}">${t}</span>`;
+function add(id){const p=PRODS.find(x=>x.id===id);if((cart[id]||0)<p.stock-p.reserved){cart[id]=(cart[id]||0)+1;if(!cartKey)cartKey=crypto.randomUUID();drawCart()}}
+function drawCart(){const it=Object.entries(cart);$('cart').innerHTML=it.length?'<table>'+it.map(([i,q])=>{const p=PRODS.find(x=>x.id==i);return `<tr><td>${p.emoji} ${p.name}</td><td>x${q}</td><td>$${q*p.price}</td></tr>`}).join('')+`</table><small>Idempotency-Key del carrito: ${cartKey.slice(0,8)} (si pulsas "Confirmar" dos veces seguidas no se crean dos pedidos)</small>`:'Carrito vacío'}
+async function checkout(){
+ const items=Object.entries(cart).map(([id,q])=>({product_id:+id,qty:q}));if(!items.length)return;
+ const r=await api('orders','POST',{customer:'Cliente web',items},{'Idempotency-Key':cartKey});
+ if(r.code>=400){$('msg').textContent='⛔ '+r.d.error}else{$('msg').textContent=r.d.replay?'♻ Reintento detectado: se devolvió el pedido #'+r.d.id+' (no se creó otro).':'✔ Pedido #'+r.d.id+' creado y stock reservado.';cart={};cartKey=null}
+ load();
+}
+const hook=async(id,st)=>{const r=await api('payments/webhook','POST',{event_id:'evt-'+id+'-'+st,order_id:id,status:st});if(r.d.duplicate)$('msg').textContent='♻ Webhook duplicado ignorado (idempotente).';load()};
+const adv=async id=>{const r=await api('orders/'+id+'/advance','POST');if(r.d.error)alert(r.d.error);load()};
+const exp=async id=>{await api('orders/'+id+'/expire','POST');load()};
+async function reset(){await api('reset','POST');cart={};cartKey=null;$('msg').textContent='Demo reiniciada.';load()}
+async function load(){
+ const [p,o,a,m]=await Promise.all(['products','orders','audit','metrics'].map(x=>api(x)));
+ PRODS=p.d;
+ $('cat').innerHTML=PRODS.map(x=>{const av=x.stock-x.reserved;return `<div class="prod"><div class="em">${x.emoji}</div><b>${x.name}</b><br>$${x.price}<br><small>Disponible: ${av} · reservado: ${x.reserved} · stock físico: ${x.stock}</small><br><button ${av?'':'disabled'} onclick="add(${x.id})">Agregar</button></div>`}).join('');
+ drawCart();
+ $('ords').innerHTML=o.d.length?'<table><tr><th>#</th><th>Productos</th><th>Total</th><th>Seguimiento</th><th>Acciones</th></tr>'+o.d.map(x=>{
+  const prog=['CANCELADO','EXPIRADO'].includes(x.status)?`${pill(x.status,x.status==='EXPIRADO'?'w':'e')} ${x.message||''}`:'<div class="steps">'+FLOW.map((s,i)=>`<span class="st ${i<=FLOW.indexOf(x.status)?'on':''}">${s}</span>`).join('')+'</div>'+(x.tracking?`<small>Guía: ${x.tracking}</small>`:'')+(x.expires_in!=null?`<small>Reserva vence en ${Math.floor(x.expires_in/60)}:${String(x.expires_in%60).padStart(2,'0')}</small>`:'')+(x.message?`<br><small>${x.message}</small>`:'');
+  let btn='';
+  if(x.status==='RESERVADO')btn=`<button onclick="hook(${x.id},'approved')">Pago aprobado</button><button class="r" onclick="hook(${x.id},'rejected')">Pago rechazado</button><button class="g" onclick="exp(${x.id})">Forzar expiración</button>`;
+  else if(x.status==='EXPIRADO')btn=`<button onclick="hook(${x.id},'approved')">Llega pago aprobado (tarde)</button><button class="r" onclick="hook(${x.id},'rejected')">Pago rechazado</button>`;
+  else if(['PAGADO','EN_PREPARACION'].includes(x.status))btn=`<button onclick="adv(${x.id})">Avanzar estado (operador)</button><button class="g" onclick="hook(${x.id},'approved')">Reenviar webhook duplicado</button>`;
+  return `<tr><td>${x.id}</td><td>${x.items.map(i=>i.emoji+' '+i.name+' x'+i.qty).join('<br>')}</td><td>$${x.total} ${pill(x.payment_status,x.payment_status==='PAGADO'?'ok':x.payment_status==='REEMBOLSADO'?'w':'i')}</td><td>${prog}</td><td>${btn}</td></tr>`}).join('')+'</table>':'Sin pedidos';
+ $('aud').innerHTML='<table><tr><th>Hora</th><th>Pedido</th><th>Evento</th><th>Detalle</th></tr>'+a.d.map(x=>`<tr><td>${x.ts}</td><td>${x.order_id??''}</td><td>${x.event}</td><td>${x.detail||''}</td></tr>`).join('')+'</table>';
+ const M=m.d,K=[['Pedidos completados',M.pedidos_completados],['Cancelaciones',M.cancelaciones],['Errores de pago',M.errores_de_pago],['Tiempo compra→despacho',M.tiempo_compra_despacho_s==null?'—':M.tiempo_compra_despacho_s+' s'],['Webhooks duplicados ignorados',M.webhooks_duplicados_ignorados]];
+ $('kpis').innerHTML=K.map(k=>`<div class="kpi"><b>${k[1]}</b><span>${k[0]}</span></div>`).join('');
+}
+load();setInterval(load,5000);
+</script></body></html>
